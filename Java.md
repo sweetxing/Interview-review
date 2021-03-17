@@ -34,11 +34,85 @@
 
 ## 二、集合（list、set、map）
 
+### 2.1 map
+
+#### ConcurrentHashMap的put过程
+
+```java
+final V putVal(K key, V value, boolean onlyIfAbsent) {
+    if (key == null || value == null) throw new NullPointerException();
+    int hash = spread(key.hashCode());
+    int binCount = 0;
+    for (Node<K,V>[] tab = table;;) {
+        Node<K,V> f; int n, i, fh;
+        if (tab == null || (n = tab.length) == 0)
+            tab = initTable();
+        else if ((f = tabAt(tab, i = (n - 1) & hash)) == null) {
+            if (casTabAt(tab, i, null,
+                         new Node<K,V>(hash, key, value, null)))
+                break;                   // no lock when adding to empty bin
+        }
+        else if ((fh = f.hash) == MOVED)
+            tab = helpTransfer(tab, f);
+        else {
+            V oldVal = null;
+            synchronized (f) {
+                if (tabAt(tab, i) == f) {
+                    if (fh >= 0) {
+                        binCount = 1;
+                        for (Node<K,V> e = f;; ++binCount) {
+                            K ek;
+                            if (e.hash == hash &&
+                                ((ek = e.key) == key ||
+                                 (ek != null && key.equals(ek)))) {
+                                oldVal = e.val;
+                                if (!onlyIfAbsent)
+                                    e.val = value;
+                                break;
+                            }
+                            Node<K,V> pred = e;
+                            if ((e = e.next) == null) {
+                                pred.next = new Node<K,V>(hash, key,
+                                                          value, null);
+                                break;
+                            }
+                        }
+                    }
+                    else if (f instanceof TreeBin) {
+                        Node<K,V> p;
+                        binCount = 2;
+                        if ((p = ((TreeBin<K,V>)f).putTreeVal(hash, key,
+                                                       value)) != null) {
+                            oldVal = p.val;
+                            if (!onlyIfAbsent)
+                                p.val = value;
+                        }
+                    }
+                }
+            }
+            if (binCount != 0) {
+                if (binCount >= TREEIFY_THRESHOLD)
+                    treeifyBin(tab, i);
+                if (oldVal != null)
+                    return oldVal;
+                break;
+            }
+        }
+    }
+    addCount(1L, binCount);
+    return null;
+}
+```
+
 ### 三、类加载机制
 
-## 四、多线程
+## 四、线程池
 
-### 4.1 多线程参数
+- **降低资源消耗**  通过重复已创建的线程降低线程创建和销毁造成的消耗
+- **提高响应速度**  任务可以不需要等到线程创建就能立刻执行
+- **提高现成的可管理性**  师兄用线程池可以对线程进行统一的分配，调优和监控
+
+### 4.1 线程池参数
 
 **ThreadPoolExecutor**
 
@@ -49,7 +123,7 @@
                           TimeUnit unit,  // 存活时间的时间单位
                           BlockingQueue<Runnable> workQueue,  // 等待执行的任务的阻塞队列
                           ThreadFactory threadFactory,  // 创建线程的工厂
-                          RejectedExecutionHandler handler  // 搞个策列，当队列满并且线程个数达到maximunPoolSize
+                          RejectedExecutionHandler handler  // 拒绝策列，当队列满并且线程个数达到maximunPoolSize
 ```
 
 ### 4.2 线程池类型
