@@ -88,3 +88,13 @@ ALTER TABLE table_name ADD INDEX [index_name] (column_list)
 | REPEATABLE-READ  | ×    | ×          | 勾   |
 | SERIALIZABLE     | ×    | ×          | ×    |
 
+## 四、主从复制
+
+### 4.1 原理
+
+1. 主服务器操作数据，并将数据写入Binary log
+2. 主库创建binlog dump thread把binlog的内容发动到从库
+3. 从库启动并发起连接，连接到主库
+4. 从库启动之后，创建一个I/O线程，读取主库传过来的binlog内容并写入到relay log
+5. 从库启动之后，创建一个SQL线程，从relay log里面读取内容，从Exec_Master_Log_Pos位置开始执行读取到的更新事件，将更新内容写入到slave的db
+
