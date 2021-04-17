@@ -63,7 +63,7 @@ ALTER TABLE table_name ADD INDEX [index_name] (column_list)
 ### 3.1 事务的四大特性
 
 - **原子性**  事务是最小的执行范围，不允许分割
-- **一致性**  执行十五前后，数据保持一致，多个事务对同一个数据读取的结果是相同的
+- **一致性**  执行事务前后，数据保持一致，多个事务对同一个数据读取的结果是相同的
 - **隔离性**  并发访问数据库时，一个用户的事务不被其他事物所干扰，各并发事务之间数据库是独立的
 - **持久性**  一个事务被提交之后。它对数据库中的改变是持久的。
 
@@ -98,3 +98,54 @@ ALTER TABLE table_name ADD INDEX [index_name] (column_list)
 4. 从库启动之后，创建一个I/O线程，读取主库传过来的binlog内容并写入到relay log
 5. 从库启动之后，创建一个SQL线程，从relay log里面读取内容，从Exec_Master_Log_Pos位置开始执行读取到的更新事件，将更新内容写入到slave的db
 
+## 五、三大日志log
+
+### 5.1 bin_log
+
+- **作用**
+
+binlog用于记录数据库执行的写入性操作(不包括查询)信息，以二进制的形式保存在磁盘中。binlog是MySQL的逻辑日志，并且由Server层进行记录，任何存储引擎都会记录binlog日志。
+
+```apl
+binlog用于记录数据库执行的写入性操作(不包括查询)信息，以二进制的形式保存在磁盘中。binlog是MySQL的逻辑日志，并且由Server层进行记录，任何存储引擎都会记录binlog日志。
+binlog是通过追加的方式进行写入的，可以通过max_binlog_size参数设置每个binlog文件的大小，当文件大小达到给定值之后，会生成新的文件来保存日志。
+ 一个事务的binlog日志不会被拆到两个binlog文件。
+```
+- **使用场景**
+  - 主从复制：在Master端开启binlog，然后将binlog发送到各个Slave端，Slave端重放binlog从而达到主从数据一致
+  - 数据恢复：通过使用mysqlbinlog工具来恢复数据
+- **刷盘时机**  （sync_binlog
+
+### 5.2 redo_log
+
+**修改随时刷回磁盘带来的问题：**
+
+1. 因为Innodb是以**页**为单位进行磁盘交互的，而一个事务很可能只修改一个数据页里面的几个字节，这个时候将完整的数据页刷到磁盘的话，浪费资源；
+2. 一个事务可能涉及修改多个数据页，并且这些数据页在物理上并不连续，使用随机IO写入性能太差
+
+- **作用：**
+  - 只记录事务对数据页做了哪些修改，这样就能解决性能问题了(相对而言文件更小并且是顺序IO)
+  - 具备crash-safe 能力，提供断电重启时解决事务丢失数据问题；
+  - 提高性能：先写redo log记录更新。当等到有空闲线程、内存不足、redo log满了时`刷脏`。写 redo log 是顺序写入，刷脏是随机写，节省的是随机写磁盘的 IO 消耗（转成顺序写），所以性能得到提升。
+- **组成和写入：**
+  - redo log包括两部分：一个是内存中的日志缓冲(redo log buffer)，另一个是磁盘上的日志文件(redo log file)。MySQL每执行一条DML语句，先将记录写入redo log buffer，后续某个时间点再一次性将多个操作记录写到redo log file。这种先写日志，再写磁盘的技术就是MySQL里经常说到的WAL(Write-Ahead Logging) 技术。
+- **redo log 两阶段提交**
+
+两阶段提交可以确保 binlog 和 redo log 数据一致性。更新内存后引擎层写 redo log 将状态改成 prepare 为预提交第一阶段，Server 层写 binlog，将状态改成 commit为提交第二阶段。
+
+redo log 容灾恢复过程：
+
+- 判断 redo log 是否完整，如果判断是完整（commit）的，直接用 redo log 恢复
+- 如果 redo log 只是预提交 prepare 但不是 commit 状态，这个时候就会去判断 binlog 是否完整，如果完整就提交 redo log，用 redo log 恢复，不完整就回滚事务，丢弃数据。
+
+![image-20210410212151737](./binlog和redolog对比.png)
+
+### 5.3 undo_log
+
+- **功能**
+
+ undo log是逻辑日志、回滚日志。比如一条修改 +3 的逻辑语句，Undo log 会记录对应一条 -3 的逻辑日记，一条插入语句则会记录一条删除语句，这样发生错误时，根据执行 Undo log 就可以回滚到事务之前的数据状态。
+
+- **作用**
+  - 回滚数据：当程序发生异常错误时等，根据执行 undo log 就可以回滚到事务之前的数据状态，保证原子性，要么成功要么失败。
+  - MVCC 多版本并发控制（Multi-Version Concurrency Control）：通过 undo log 找到对应的数据版本号，是保证 MVCC 视图的一致性的必要条件。通过记录数据项历史版本的方式，来提升系统应对多事务访问的并发处理能力。
